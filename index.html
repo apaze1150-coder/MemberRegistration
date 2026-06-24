@@ -310,12 +310,12 @@
     // Global State บันทึกข้อมูลที่ AI สกัดได้จากเล่มจริง
     let passportData = null;
 
-    // ฟังก์ชันยิงเข้าหา AI Agent (Gemini 3.5 Flash) บน Google AI Studio แบบส่งตรงรูปภาพ
+    // ฟังก์ชันยิงเข้าหา AI Agent บน Google AI Studio แบบส่งตรงรูปภาพ
     async function processPassportOCR(input) {
         if (!input.files || !input.files[0]) return;
         
         const file = input.files[0];
-        // 🔒 รหัส API Key จากโครงการ KingPower-Passport-OCR เรียบร้อยแล้ว
+        // 🔒 รหัส API Key ของคุณจากโครงการ KingPower-Passport-OCR
         const apiKey = "AQ.Ab8RN6JW5ADrqAe2gmATUNtmIhPr7HR0XZwHvTlkNRA0qeZ01g"; 
         
         // ฟังก์ชันช่วยเข้ารหัสรูปภาพเป็น Base64 ในฝั่ง Memory Browser
@@ -329,14 +329,14 @@
         try {
             const base64Image = await blobToBase64(file);
             
-            // 🛠️ แก้ไขจุดนี้: ชี้เป้าไปที่ Endpoint โมเดลเวอร์ชันล่าสุดสอดคล้องกับสตูดิโอ (gemini-3.5-flash)
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
+            // ใช้โครงสร้าง Endpoint ที่เสถียรที่สุดรองรับ Multimodal Vision
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     contents: [{
                         parts: [
-                            { text: "ช่วยสกัดข้อมูลจากพาสปอร์ตนี้ตามกฎใน System Instructions" },
+                            { text: "ช่วยสกัดข้อมูลจากรูปภาพพาสปอร์ตนี้ตามกฎใน System Instructions ข้อมูล 6 บรรทัด" },
                             { inlineData: { mimeType: file.type, data: base64Image } }
                         ]
                     }]
@@ -344,7 +344,17 @@
             });
 
             const json = await response.json();
-            const aiTextResponse = json.candidates[0].content.parts[0].text;
+            console.log("AI Response Raw JSON:", json); // สั่งพิมพ์ดูโครงสร้างใน Console เผื่อตรวจสอบ
+
+            // 🛠️ ส่วนที่แก้ไข: ระบบตรวจสอบโครงสร้าง JSON ป้องกัน Error ปลอม
+            let aiTextResponse = "";
+            if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+                aiTextResponse = json.candidates[0].content.parts[0].text;
+            } else if (json.error) {
+                throw new Error(`Google API Error: ${json.error.message}`);
+            } else {
+                throw new Error("โครงสร้างการตอบกลับของ AI เปลี่ยนแปลงหรือไม่ถูกต้อง");
+            }
 
             // นำผลลัพธ์ข้อมูลสายอักขระ (String) มาแกะเข้าตัวแปร Object
             const lines = aiTextResponse.split('\n');
@@ -361,12 +371,14 @@
             // ตรวจสอบความถูกต้องและสภาวะ "วันหมดอายุ" ของพาสปอร์ต
             let isExpired = false;
             if (passportData.expiryDate && passportData.expiryDate !== '-') {
+                // รองรับทั้งรูปแบบ DD/MM/YYYY หรือการอ่านค่าวันที่แบบอื่นเบื้องต้น
                 const parts = passportData.expiryDate.split('/');
-                const expiryDateObj = new Date(parts[2], parts[1] - 1, parts[0]);
-                const today = new Date();
-
-                if (expiryDateObj < today) {
-                    isExpired = true;
+                if(parts.length === 3) {
+                    const expiryDateObj = new Date(parts[2], parts[1] - 1, parts[0]);
+                    const today = new Date();
+                    if (expiryDateObj < today) {
+                        isExpired = true;
+                    }
                 }
             }
 
@@ -393,8 +405,8 @@
             input.value = '';
 
         } catch (error) {
-            console.error(error);
-            alert("ระบบ AI OCR เกิดข้อผิดพลาด ไม่สามารถตรวจสอบภาพได้ในขณะนี้");
+            console.error("OCR Process Blocked:", error);
+            alert("ระบบ AI OCR เกิดข้อผิดพลาด ไม่สามารถแกะโครงสร้างภาพได้ในขณะนี้\nรายละเอียด: " + error.message);
         }
     }
 
@@ -417,15 +429,12 @@
             return;
         }
 
-        // 1. ข้อความมาตรฐานเริ่มต้น
         let formattedMessage = `KINGPOWER POWER PASS REGISTRATION\n--------------------------\nSHOP: ${shopName}\nEMAIL: ${email}`;
         
-        // 2. ถ้าหากมีข้อมูลจาก AI OCR พาสปอร์ต ให้ทำการจัดระเบียบข้อมูลพาสปอร์ตเพิ่มเข้าไป
         if (passportData) {
             formattedMessage += `\n--------------------------\nPASSPORT OCR DATA:\n1. NAME: ${passportData.firstName}\n2. SURNAME: ${passportData.lastName}\n3. GENDER: ${passportData.gender}\n4. DATE OF BIRTH: ${passportData.dob}\n5. PASSPORT NO: ${passportData.passportNumber}\n6. EXPIRY DATE: ${passportData.expiryDate}`;
         }
         
-        // 3. ปิดท้ายด้วยวันที่ทำรายการ
         formattedMessage += `\n--------------------------\nDate: ${new Date().toLocaleDateString('en-GB')}`;
         
         preview.innerText = formattedMessage;
@@ -448,7 +457,6 @@
         document.getElementById('shop_name').value = '';
         document.getElementById('email').value = '';
         
-        // ล้างข้อมูลระบบสแกน
         clearOCRData();
         
         const preview = document.getElementById('message_preview');
@@ -481,5 +489,3 @@
         }
     }
 </script>
-</body>
-</html>
